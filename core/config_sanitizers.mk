@@ -65,6 +65,18 @@ ifneq ($(filter memtag_heap, $(my_global_sanitize)),)
   endif
 endif
 
+# Disable global HWASan in excluded paths
+ifneq ($(filter hwaddress, $(my_global_sanitize)),)
+  combined_exclude_paths := $(HWASAN_EXCLUDE_PATHS) \
+                            $(PRODUCT_HWASAN_EXCLUDE_PATHS)
+
+  ifneq ($(strip $(foreach dir,$(subst $(comma),$(space),$(combined_exclude_paths)),\
+         $(filter $(dir)%,$(LOCAL_PATH)))),)
+    my_global_sanitize := $(filter-out hwaddress,$(my_global_sanitize))
+    my_global_sanitize_diag := $(filter-out hwaddress,$(my_global_sanitize_diag))
+  endif
+endif
+
 ifneq ($(my_global_sanitize),)
   my_sanitize := $(my_global_sanitize) $(my_sanitize)
 endif
@@ -243,6 +255,7 @@ endif
 ifneq ($(filter address,$(my_sanitize)),)
   my_sanitize := $(filter-out cfi,$(my_sanitize))
   my_sanitize := $(filter-out memtag_stack,$(my_sanitize))
+  my_sanitize := $(filter-out memtag_globals,$(my_sanitize))
   my_sanitize := $(filter-out memtag_heap,$(my_sanitize))
   my_sanitize_diag := $(filter-out cfi,$(my_sanitize_diag))
 endif
@@ -250,8 +263,8 @@ endif
 # Disable memtag for host targets. Host executables in AndroidMk files are
 # deprecated, but some partners still have them floating around.
 ifdef LOCAL_IS_HOST_MODULE
-  my_sanitize := $(filter-out memtag_heap memtag_stack,$(my_sanitize))
-  my_sanitize_diag := $(filter-out memtag_heap memtag_stack,$(my_sanitize_diag))
+  my_sanitize := $(filter-out memtag_heap memtag_stack memtag_globals,$(my_sanitize))
+  my_sanitize_diag := $(filter-out memtag_heap memtag_stack memtag_globals,$(my_sanitize_diag))
 endif
 
 # Disable sanitizers which need the UBSan runtime for host targets.
@@ -286,11 +299,13 @@ ifneq ($(filter arm x86 x86_64,$(TARGET_$(LOCAL_2ND_ARCH_VAR_PREFIX)ARCH)),)
   my_sanitize := $(filter-out hwaddress,$(my_sanitize))
   my_sanitize := $(filter-out memtag_heap,$(my_sanitize))
   my_sanitize := $(filter-out memtag_stack,$(my_sanitize))
+  my_sanitize := $(filter-out memtag_globals,$(my_sanitize))
 endif
 
 ifneq ($(filter hwaddress,$(my_sanitize)),)
   my_sanitize := $(filter-out address,$(my_sanitize))
   my_sanitize := $(filter-out memtag_stack,$(my_sanitize))
+  my_sanitize := $(filter-out memtag_globals,$(my_sanitize))
   my_sanitize := $(filter-out memtag_heap,$(my_sanitize))
   my_sanitize := $(filter-out thread,$(my_sanitize))
   my_sanitize := $(filter-out cfi,$(my_sanitize))
@@ -307,7 +322,7 @@ ifneq ($(filter hwaddress,$(my_sanitize)),)
   endif
 endif
 
-ifneq ($(filter memtag_heap memtag_stack,$(my_sanitize)),)
+ifneq ($(filter memtag_heap memtag_stack memtag_globals,$(my_sanitize)),)
   ifneq ($(filter memtag_heap,$(my_sanitize_diag)),)
     my_cflags += -fsanitize-memtag-mode=sync
     my_sanitize_diag := $(filter-out memtag_heap,$(my_sanitize_diag))
@@ -334,6 +349,14 @@ ifneq ($(filter memtag_stack,$(my_sanitize)),)
   my_ldflags += -march=armv8a+memtag
   my_asflags += -march=armv8a+memtag
   my_sanitize := $(filter-out memtag_stack,$(my_sanitize))
+endif
+
+ifneq ($(filter memtag_globals,$(my_sanitize)),)
+  my_cflags += -fsanitize=memtag-globals
+  # TODO(mitchp): For now, enable memtag-heap with memtag-globals because the
+  # linker isn't new enough
+  # (https://reviews.llvm.org/differential/changeset/?ref=4243566).
+  my_sanitize := $(filter-out memtag_globals,$(my_sanitize))
 endif
 
 # TSAN is not supported on 32-bit architectures. For non-multilib cases, make
@@ -395,6 +418,12 @@ ifneq ($(filter fuzzer,$(my_sanitize)),)
   my_sanitize := $(filter-out cfi,$(my_sanitize))
   my_cflags += -fno-lto
   my_ldflags += -fno-lto
+
+  # TODO(b/142430592): Upstream linker scripts for sanitizer runtime libraries
+  # discard the sancov_lowest_stack symbol, because it's emulated TLS (and thus
+  # doesn't match the linker script due to the "__emutls_v." prefix).
+  my_cflags += -fno-sanitize-coverage=stack-depth
+  my_ldflags += -fno-sanitize-coverage=stack-depth
 endif
 
 ifneq ($(filter integer_overflow,$(my_sanitize)),)
@@ -444,7 +473,6 @@ ifneq ($(my_sanitize),)
     my_ldflags += -fsanitize=$(fsanitize_arg)
   else
     my_cflags += -fsanitize-trap=all
-    my_cflags += -ftrap-function=abort
     ifneq ($(filter address thread,$(my_sanitize)),)
       my_cflags += -fno-sanitize-trap=address,thread
       my_shared_libraries += libdl
@@ -468,7 +496,6 @@ ifneq ($(filter cfi,$(my_sanitize)),)
   my_ldflags += $(LOCAL_LDFLAGS_OVERRIDE)
   my_cflags += $(LOCAL_CFLAGS_OVERRIDE)
   my_asflags += $(LOCAL_ASFLAGS_OVERRIDE)
-  my_arflags += --plugin $(LLVM_PREBUILTS_PATH)/../lib64/LLVMgold.so
 
   ifeq ($(LOCAL_FORCE_STATIC_EXECUTABLE),true)
         my_ldflags := $(filter-out -fsanitize-cfi-cross-dso,$(my_ldflags))

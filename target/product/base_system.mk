@@ -19,11 +19,8 @@ PRODUCT_PACKAGES += \
     abx \
     adbd_system_api \
     am \
-    android.hidl.allocator@1.0-service \
     android.hidl.base-V1.0-java \
     android.hidl.manager-V1.0-java \
-    android.hidl.memory@1.0-impl \
-    android.hidl.memory@1.0-impl.vendor \
     android.system.suspend-service \
     android.test.base \
     android.test.mock \
@@ -90,19 +87,21 @@ PRODUCT_PACKAGES += \
     dump.erofs \
     dumpstate \
     dumpsys \
-    DynamicSystemInstallationService \
     e2fsck \
     ExtShared \
     flags_health_check \
     framework-graphics \
+    framework-location \
     framework-minus-apex \
-    framework-res \
+    framework-minus-apex-install-dependencies \
+    framework-nfc \
     framework-sysconfig.xml \
     fsck.erofs \
     fsck_msdos \
     fsverity-release-cert-der \
     fs_config_files_system \
     fs_config_dirs_system \
+    gpu_counter_producer \
     group_system \
     gsid \
     gsi_tool \
@@ -111,7 +110,6 @@ PRODUCT_PACKAGES += \
     gatekeeperd \
     gpuservice \
     hid \
-    hwservicemanager \
     idmap2 \
     idmap2d \
     ime \
@@ -128,7 +126,6 @@ PRODUCT_PACKAGES += \
     IntentResolver \
     ip \
     iptables \
-    ip-up-vpn \
     javax.obex \
     keystore2 \
     ld.mc \
@@ -226,7 +223,6 @@ PRODUCT_PACKAGES += \
     mkfs.erofs \
     monkey \
     mtectrl \
-    mtpd \
     ndc \
     netd \
     NetworkStack \
@@ -238,14 +234,15 @@ PRODUCT_PACKAGES += \
     perfetto \
     ping \
     ping6 \
+    pintool \
     platform.xml \
     pm \
-    pppd \
     preinstalled-packages-asl-files.xml \
     preinstalled-packages-platform.xml \
+    preinstalled-packages-strict-signature.xml \
+    printflags \
     privapp-permissions-platform.xml \
     prng_seeder \
-    racoon \
     recovery-persist \
     resize2fs \
     rss_hwm_reset \
@@ -262,13 +259,13 @@ PRODUCT_PACKAGES += \
     services \
     settings \
     SettingsProvider \
+    sfdo \
     sgdisk \
     Shell \
     shell_and_utilities_system \
     sm \
     snapshotctl \
     snapuserd \
-    SoundPicker \
     storaged \
     surfaceflinger \
     svc \
@@ -285,7 +282,6 @@ PRODUCT_PACKAGES += \
     uncrypt \
     usbd \
     vdc \
-    viewcompiler \
     voip-common \
     vold \
     watchdogd \
@@ -300,10 +296,36 @@ PRODUCT_PACKAGES += \
     SecureElement
 endif
 
+# These packages are not used on Android TV
+ifneq ($(PRODUCT_IS_ATV),true)
+  PRODUCT_PACKAGES += \
+      $(RELEASE_PACKAGE_SOUND_PICKER) \
+
+endif
+
+# Product does not support Dynamic System Update
+ifneq ($(PRODUCT_NO_DYNAMIC_SYSTEM_UPDATE),true)
+    PRODUCT_PACKAGES += \
+        DynamicSystemInstallationService \
+
+endif
+
 # VINTF data for system image
 PRODUCT_PACKAGES += \
     system_manifest.xml \
     system_compatibility_matrix.xml \
+
+# Base modules when shipping api level is less than or equal to 34
+PRODUCT_PACKAGES_SHIPPING_API_LEVEL_34 += \
+    android.hidl.memory@1.0-impl \
+
+# hwservicemanager is now installed on system_ext, but apexes might be using
+# old libraries that are expecting it to be installed on system. This allows
+# those apexes to continue working. The symlink can be removed once we are sure
+# there are no devices using hwservicemanager (when Android V launching devices
+# are no longer supported for dessert upgrades).
+PRODUCT_PACKAGES += \
+    hwservicemanager_compat_symlink_module \
 
 PRODUCT_PACKAGES_ARM64 := libclang_rt.hwasan \
  libclang_rt.hwasan.bootstrap \
@@ -331,6 +353,15 @@ ifeq (,$(DISABLE_WALLPAPER_BACKUP))
     WallpaperBackup
 endif
 
+# Moving angle from vendor to system
+ifeq ($(RELEASE_ANGLE_ON_SYSTEM),true)
+PRODUCT_PACKAGES += \
+    libEGL_angle \
+    libGLESv1_CM_angle \
+    libGLESv2_angle
+$(call soong_config_set,angle,angle_on_system,true)
+endif
+
 # For testing purposes
 ifeq ($(FORCE_AUDIO_SILENT), true)
     PRODUCT_SYSTEM_PROPERTIES += ro.audio.silent=1
@@ -340,6 +371,7 @@ endif
 PRODUCT_HOST_PACKAGES += \
     BugReport \
     adb \
+    adevice \
     art-tools \
     atest \
     bcc \
@@ -355,7 +387,6 @@ PRODUCT_HOST_PACKAGES += \
     incident_report \
     ld.mc \
     lpdump \
-    minigzip \
     mke2fs \
     mkfs.erofs \
     resize2fs \
@@ -366,7 +397,6 @@ PRODUCT_HOST_PACKAGES += \
     unwind_info \
     unwind_reg_info \
     unwind_symbols \
-    viewcompiler \
     tzdata_host \
     tzdata_host_tzdata_apex \
     tzlookup.xml_host_tzdata_apex \
@@ -388,8 +418,10 @@ PRODUCT_SYSTEM_PROPERTIES += persist.traced.enable=1
 # Packages included only for eng or userdebug builds, previously debug tagged
 PRODUCT_PACKAGES_DEBUG := \
     adb_keys \
+    adevice_fingerprint \
     arping \
     dmuserd \
+    evemu-record \
     idlcli \
     init-debug.rc \
     iotop \
@@ -399,6 +431,7 @@ PRODUCT_PACKAGES_DEBUG := \
     libclang_rt.ubsan_standalone \
     logpersist.start \
     logtagd.rc \
+    ot-cli-ftd \
     procrank \
     profcollectd \
     profcollectctl \
@@ -441,3 +474,6 @@ PRODUCT_COPY_FILES += $(call add-to-product-copy-files-if-exists,\
     frameworks/base/config/dirty-image-objects:system/etc/dirty-image-objects)
 
 $(call inherit-product, $(SRC_TARGET_DIR)/product/runtime_libart.mk)
+
+# Use "image" APEXes always.
+$(call inherit-product,$(SRC_TARGET_DIR)/product/updatable_apex.mk)
